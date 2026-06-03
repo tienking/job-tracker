@@ -6,13 +6,13 @@ from google import genai
 from google.genai import types
 from config import GEMINI_API_KEY
 from database import (
-    get_ai_settings, save_message, get_chat_history, delete_chat_history,
+    get_ai_settings, update_ai_settings, save_message, get_chat_history, delete_chat_history,
     get_all_users, get_user, create_user, update_password, delete_user,
     get_jobs, set_jobs, get_profile, update_profile,
 )
 from auth import (
     create_jt_token, verify_jt_token,
-    create_jtadmin_token, verify_jtadmin_token,
+    verify_jtadmin_token,
     hash_password, check_password,
 )
 import asyncio
@@ -356,18 +356,8 @@ async def jt_chat_file(
     await save_message(sid, "model", response.text)
     return {"reply": response.text}
 
-# ── JT Admin: Login ────────────────────────────────────────────────────────────
-
-@router.post("/api/jtadmin/login")
-async def jtadmin_login(data: LoginRequest):
-    if data.username != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-    user = await get_user("admin")
-    if not user or not check_password(data.password, user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {"access_token": create_jtadmin_token("admin"), "token_type": "bearer"}
-
 # ── JT Admin: User Management ──────────────────────────────────────────────────
+# Admin auth reuses the regular jobtracker token (sub == "admin"). No separate login.
 
 @router.get("/api/jtadmin/users")
 async def jtadmin_list_users(_: str = Depends(verify_jtadmin_token)):
@@ -407,4 +397,22 @@ async def jtadmin_set_jobs(username: str, jobs: List[Dict[str, Any]], _: str = D
     if not await get_user(username):
         raise HTTPException(status_code=404, detail="User not found")
     await set_jobs(username, jobs)
+    return {"ok": True}
+
+# ── JT Admin: AI Settings ──────────────────────────────────────────────────────
+
+class AISettingsUpdate(BaseModel):
+    active_model: Optional[str] = None
+    available_models: Optional[List[str]] = None
+
+@router.get("/api/jtadmin/ai-settings")
+async def jtadmin_get_ai_settings(_: str = Depends(verify_jtadmin_token)):
+    return await get_ai_settings()
+
+@router.put("/api/jtadmin/ai-settings")
+async def jtadmin_update_ai_settings(data: AISettingsUpdate, _: str = Depends(verify_jtadmin_token)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await update_ai_settings(updates)
     return {"ok": True}

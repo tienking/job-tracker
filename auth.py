@@ -26,20 +26,16 @@ def verify_jt_token(credentials: HTTPAuthorizationCredentials = Security(securit
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-# ── JT Admin token (8 hours, username must be "admin") ────────────────────────
-
-def create_jtadmin_token(username: str) -> str:
-    payload = {"sub": username, "type": "jtadmin", "exp": datetime.utcnow() + timedelta(hours=8)}
-    return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
+# ── JT Admin: reuse the regular jobtracker token, require sub == "admin" ──────
 
 def verify_jtadmin_token(credentials: HTTPAuthorizationCredentials = Security(security)) -> str:
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[ALGORITHM])
-        if payload.get("type") != "jtadmin":
+        if payload.get("type") != "jobtracker":
             raise HTTPException(status_code=401, detail="Invalid token")
         username = payload.get("sub")
-        if not username or username != "admin":
-            raise HTTPException(status_code=401, detail="Access denied")
+        if username != "admin":
+            raise HTTPException(status_code=403, detail="Access denied")
         return username
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

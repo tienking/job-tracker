@@ -4,9 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/root/jobtracker
-EnvironmentFile=/root/jobtracker/.env
-ExecStart=/root/jobtracker/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
+WorkingDirectory=/root/job-tracker
+EnvironmentFile=/root/job-tracker/.env
+ExecStart=/root/job-tracker/job-tracker-venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
 Restart=always
 RestartSec=5
 
