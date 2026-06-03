@@ -12,7 +12,7 @@ from database import (
 )
 from auth import (
     create_jt_token, verify_jt_token,
-    create_jtadmin_token, verify_jtadmin_token,
+    verify_jtadmin_token,
     hash_password, check_password,
 )
 import asyncio
@@ -356,18 +356,8 @@ async def jt_chat_file(
     await save_message(sid, "model", response.text)
     return {"reply": response.text}
 
-# ── JT Admin: Login ────────────────────────────────────────────────────────────
-
-@router.post("/api/jtadmin/login")
-async def jtadmin_login(data: LoginRequest):
-    if data.username != "admin":
-        raise HTTPException(status_code=403, detail="Access denied")
-    user = await get_user("admin")
-    if not user or not check_password(data.password, user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {"access_token": create_jtadmin_token("admin"), "token_type": "bearer"}
-
 # ── JT Admin: User Management ──────────────────────────────────────────────────
+# Admin auth reuses the regular jobtracker token (sub == "admin"). No separate login.
 
 @router.get("/api/jtadmin/users")
 async def jtadmin_list_users(_: str = Depends(verify_jtadmin_token)):

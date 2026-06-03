@@ -1,5 +1,4 @@
 import { useState } from "react";
-import JtAdminLogin from "./components/jtadmin/LoginPage";
 import UsersTab from "./components/jtadmin/UsersTab";
 import JobsTab from "./components/jtadmin/JobsTab";
 import AITab from "./components/jtadmin/AITab";
@@ -10,14 +9,16 @@ const TABS = [
   { id: "ai",    label: "🤖 AI Models" },
 ];
 
-function getAdminToken() {
-  const token = localStorage.getItem("jtadmin_token");
+// Reuse the regular jobtracker token. Only "admin" may access this page.
+function getAdminAuth() {
+  const token = localStorage.getItem("jt_token");
   if (!token) return null;
   try {
     const payload = JSON.parse(atob(token.split(".")[1]));
-    if (payload.exp * 1000 < Date.now()) { localStorage.removeItem("jtadmin_token"); return null; }
-    return token;
-  } catch { localStorage.removeItem("jtadmin_token"); return null; }
+    if (payload.exp * 1000 < Date.now()) { localStorage.removeItem("jt_token"); return null; }
+    if (payload.sub !== "admin") return { token: null, notAdmin: true };
+    return { token };
+  } catch { localStorage.removeItem("jt_token"); return null; }
 }
 
 function Dashboard({ token, onLogout }) {
@@ -32,16 +33,10 @@ function Dashboard({ token, onLogout }) {
           <span style={{ color: "var(--border)" }}>·</span>
           <p style={{ fontSize: 14, fontWeight: 500, color: "var(--text)" }}>Job Tracker</p>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <a href="/jobtracker/admin" style={{ fontSize: 12, color: "var(--text-muted)", textDecoration: "none" }}
-            onClick={e => { e.preventDefault(); window.location.href = "/jobtracker"; }}>
-            ← Về Tracker
-          </a>
-          <button onClick={onLogout}
-            style={{ fontSize: 12, color: "var(--text-muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "var(--font-display)" }}>
-            Sign out
-          </button>
-        </div>
+        <button onClick={onLogout}
+          style={{ fontSize: 12, color: "var(--text-muted)", background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 12px", cursor: "pointer", fontFamily: "var(--font-display)" }}>
+          Sign out
+        </button>
       </div>
 
       {/* Body */}
@@ -68,11 +63,18 @@ function Dashboard({ token, onLogout }) {
 }
 
 export default function JtAdminApp() {
-  const [token, setToken] = useState(() => getAdminToken());
+  const auth = getAdminAuth();
 
-  const handleLogin = (t) => { localStorage.setItem("jtadmin_token", t); setToken(t); };
-  const handleLogout = () => { localStorage.removeItem("jtadmin_token"); setToken(null); };
+  // Not logged in → go to the main Job Tracker login
+  if (!auth) { window.location.href = "/jobtracker"; return null; }
 
-  if (!token) return <JtAdminLogin onLogin={handleLogin} />;
-  return <Dashboard token={token} onLogout={handleLogout} />;
+  // Logged in but not admin → send back to their tracker
+  if (auth.notAdmin) {
+    const me = JSON.parse(atob(localStorage.getItem("jt_token").split(".")[1])).sub;
+    window.location.href = `/jobtracker/${me}`;
+    return null;
+  }
+
+  const handleLogout = () => { localStorage.removeItem("jt_token"); window.location.href = "/jobtracker"; };
+  return <Dashboard token={auth.token} onLogout={handleLogout} />;
 }
