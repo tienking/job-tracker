@@ -2,10 +2,12 @@ import { useState } from "react";
 import JtAdminLogin from "./components/jtadmin/LoginPage";
 import UsersTab from "./components/jtadmin/UsersTab";
 import JobsTab from "./components/jtadmin/JobsTab";
+import AITab from "./components/jtadmin/AITab";
 
 const TABS = [
   { id: "users", label: "👥 Người dùng" },
   { id: "jobs",  label: "📋 Jobs" },
+  { id: "ai",    label: "🤖 AI Models" },
 ];
 
 function getAdminToken() {
@@ -58,6 +60,7 @@ function Dashboard({ token, onLogout }) {
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 0" }}>
           {tab === "users" && <UsersTab token={token} />}
           {tab === "jobs"  && <JobsTab  token={token} />}
+          {tab === "ai"    && <AITab    token={token} />}
         </div>
       </div>
     </div>

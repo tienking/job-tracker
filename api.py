@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 from config import GEMINI_API_KEY
 from database import (
-    get_ai_settings, save_message, get_chat_history, delete_chat_history,
+    get_ai_settings, update_ai_settings, save_message, get_chat_history, delete_chat_history,
     get_all_users, get_user, create_user, update_password, delete_user,
     get_jobs, set_jobs, get_profile, update_profile,
 )
@@ -407,4 +407,22 @@ async def jtadmin_set_jobs(username: str, jobs: List[Dict[str, Any]], _: str = D
     if not await get_user(username):
         raise HTTPException(status_code=404, detail="User not found")
     await set_jobs(username, jobs)
+    return {"ok": True}
+
+# ── JT Admin: AI Settings ──────────────────────────────────────────────────────
+
+class AISettingsUpdate(BaseModel):
+    active_model: Optional[str] = None
+    available_models: Optional[List[str]] = None
+
+@router.get("/api/jtadmin/ai-settings")
+async def jtadmin_get_ai_settings(_: str = Depends(verify_jtadmin_token)):
+    return await get_ai_settings()
+
+@router.put("/api/jtadmin/ai-settings")
+async def jtadmin_update_ai_settings(data: AISettingsUpdate, _: str = Depends(verify_jtadmin_token)):
+    updates = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    await update_ai_settings(updates)
     return {"ok": True}
