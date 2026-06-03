@@ -1,0 +1,309 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  PROJECT_CONTEXT.xml
+  Tài liệu mô tả toàn bộ cấu trúc dự án job-tracker.
+  Dùng để cung cấp context cho AI assistant khi bắt đầu session mới.
+  Cập nhật thủ công khi có thay đổi lớn về kiến trúc.
+-->
+<project name="job-tracker" url="https://tienmai.space/jobtracker">
+
+  <!-- ════════════════════════════════════════════════════════════
+       TỔNG QUAN
+       ════════════════════════════════════════════════════════════ -->
+  <overview>
+    <description>
+      SaaS theo dõi ứng tuyển việc làm. Tách ra từ project tienmai-space thành
+      service độc lập: repo riêng, MongoDB cluster riêng, JWT secret riêng, port 8001.
+      Phục vụ chung domain tienmai.space/jobtracker qua Nginx.
+    </description>
+    <apps>
+      <app id="jobtracker" url="https://tienmai.space/jobtracker" entry="frontend/index.html">
+        App người dùng. Mỗi user có tài khoản riêng (JWT).
+        Tính năng: danh sách job, trạng thái ứng tuyển, lưu JD, filter/sort,
+        AI chatbot tư vấn, upload resume, import thông tin từ resume.
+        Giao diện tiếng Việt, dark theme (orange accent giống portfolio).
+      </app>
+      <app id="jtadmin" url="https://tienmai.space/jobtracker/admin" entry="frontend/admin.html">
+        Trang quản trị. Chỉ user "admin" truy cập được (nút Admin hiện trong header
+        của TrackerPage khi username === "admin").
+        Dùng chung jobtracker token (sub == "admin") — KHÔNG có login riêng.
+        Tính năng: quản lý users (tạo/xóa/đổi pass), xem/sửa jobs của từng user (JSON),
+        chọn AI model.
+      </app>
+    </apps>
+  </overview>
+
+  <!-- ════════════════════════════════════════════════════════════
+       TECH STACK
+       ════════════════════════════════════════════════════════════ -->
+  <techstack>
+    <backend>
+      <item>Python 3 / FastAPI 0.136.1</item>
+      <item>Pydantic 2.13.3 (v2 — có breaking changes so với v1)</item>
+      <item>Motor 3.7.1 (async MongoDB driver)</item>
+      <item>MongoDB — database "jobtracker" (cluster riêng, KHÔNG chung với tienmai)</item>
+      <item>Google GenAI SDK (google-genai 1.75.0) — Gemini models</item>
+      <item>python-jose — JWT (HS256)</item>
+      <item>bcrypt — hash password</item>
+      <item>pdfplumber — extract text từ PDF</item>
+      <item>python-docx — extract text từ DOCX</item>
+      <item>Uvicorn 0.46.0 — ASGI server, port 8001</item>
+    </backend>
+    <frontend>
+      <item>React 19 + Vite 8</item>
+      <item>Inline styles hoàn toàn — không dùng CSS framework hay Tailwind</item>
+      <item>Multi-entry build: 2 HTML entry points (index = app, admin = jtadmin)</item>
+      <item>base: "/jobtracker/" trong vite.config — assets load đúng dưới subpath</item>
+      <item>Không có routing library — path-based routing tự viết trong JobTrackerApp.jsx</item>
+    </frontend>
+    <infrastructure>
+      <item>VPS Hostinger — Ubuntu (chung server với tienmai-space)</item>
+      <item>Nginx — serve static + proxy /api/jobtracker/ và /api/jtadmin/ → port 8001</item>
+      <item>systemd service: jobtracker.service</item>
+      <item>GitLab CI/CD → deploy script trên VPS (runner tag: tienmai-space-vps)</item>
+    </infrastructure>
+  </techstack>
+
+  <!-- ════════════════════════════════════════════════════════════
+       CẤU TRÚC FILE
+       ════════════════════════════════════════════════════════════ -->
+  <filestructure>
+    <root path="d:\Projects\job-tracker\" vps_path="/root/job-tracker/">
+      <file name="main.py">
+        FastAPI app entry point. Khởi tạo app, include router từ api.py. Không có Telegram/webhook.
+      </file>
+      <file name="api.py">
+        Toàn bộ API routes (APIRouter). Gồm:
+        - JT user routes: /api/jobtracker/* (yêu cầu verify_jt_token)
+        - JT admin routes: /api/jtadmin/* (yêu cầu verify_jtadmin_token, sub == "admin")
+        Pydantic models: LoginRequest, PasswordUpdate, UserCreate, ChatRequest, JtProfileUpdate, AISettingsUpdate.
+        build_jt_system_prompt(): tạo system prompt AI cho chatbot tư vấn.
+        build_jd_context(): gom toàn bộ JD của user (có cap ký tự).
+        extract_pdf_text(), extract_docx_text(): đọc file resume/JD.
+        RESUME_DIR: lưu resume PDF mỗi user (env var, mặc định /root/job-tracker/resumes).
+      </file>
+      <file name="auth.py">
+        JWT management.
+        create_jt_token(): JWT 7 ngày, type="jobtracker".
+        verify_jt_token(): dependency cho JT user routes.
+        verify_jtadmin_token(): dependency cho JT admin routes — chấp nhận jobtracker token
+          với sub == "admin" (KHÔNG có token type riêng cho admin).
+        hash_password(), check_password(): bcrypt.
+      </file>
+      <file name="database.py">
+        Async MongoDB operations (Motor).
+        Database: "jobtracker"
+        Collections:
+          - users: tài khoản (username, hashed_password, created_at)
+          - jobs: mỗi user 1 document {username, jobs: [...], updated_at}
+          - profiles: profile cá nhân mỗi user
+          - chat_history: lịch sử chat AI (session_id, role, content, created_at)
+          - settings: AI settings (type="ai")
+      </file>
+      <file name="config.py">
+        Load biến môi trường từ .env: MONGODB_URL, JWT_SECRET, GEMINI_API_KEY.
+      </file>
+      <dir name="deploy/">
+        <file name="jobtracker.service">
+          systemd service. WorkingDirectory: /root/job-tracker/
+          ExecStart: /root/job-tracker/job-tracker-venv/bin/uvicorn main:app --host 127.0.0.1 --port 8001
+          EnvironmentFile: /root/job-tracker/.env. Restart=always.
+        </file>
+        <file name="nginx-snippet.conf">
+          Các location block cần thêm vào server block của tienmai trên VPS:
+          /jobtracker/ (alias dist, try_files fallback index.html),
+          /jobtracker/admin (serve admin.html), /api/jobtracker/ + /api/jtadmin/ → port 8001.
+        </file>
+      </dir>
+      <file name=".gitlab-ci.yml">
+        stages: [deploy]. Chỉ deploy trên branch main. Runner tag: tienmai-space-vps.
+        Script: sudo /usr/local/bin/deploy-job-tracker.sh (script nằm trên VPS, không trong repo).
+      </file>
+      <file name="requirements.txt">Pin đầy đủ dependencies.</file>
+      <file name=".gitignore">.env, venv/, __pycache__/, *.pyc, frontend/node_modules/, frontend/dist/, resumes/, CLEANUP_TIENMAI.md</file>
+    </root>
+
+    <frontend_dir path="frontend/">
+      <file name="vite.config.js">
+        Multi-entry: input = {main: index.html, admin: admin.html}. base: "/jobtracker/".
+        Dev proxy: /api → http://127.0.0.1:8001.
+      </file>
+      <file name="index.html">Entry JT app → src/main.jsx. Loads Google Fonts (Syne + DM Mono).</file>
+      <file name="admin.html">Entry JT Admin → src/admin.jsx.</file>
+      <file name="src/main.jsx">Mount JobTrackerApp (imports index.css).</file>
+      <file name="src/admin.jsx">Mount JtAdminApp (imports index.css).</file>
+      <file name="src/index.css">CSS vars dark theme (--bg, --accent #ec563d, Syne/DM Mono). Reset cơ bản.</file>
+      <file name="src/JobTrackerApp.jsx">
+        Root app người dùng — path-based router. getTokenData() decode JWT từ localStorage (jt_token).
+        Routes: /jobtracker → LoginPage | /jobtracker/:user → TrackerPage | /jobtracker/:user/profile → JtProfilePage.
+      </file>
+      <file name="src/JtAdminApp.jsx">
+        Root admin — đọc jt_token, redirect /jobtracker nếu chưa login, redirect về tracker nếu không phải admin.
+        Sidebar tabs: Người dùng (UsersTab), Jobs (JobsTab), AI Models (AITab). Nút Sign out.
+      </file>
+      <dir name="src/components/jobtracker/">
+        <file name="LoginPage.jsx">Login form tiếng Việt, lưu jt_token vào localStorage.</file>
+        <file name="TrackerPage.jsx">Bảng job chính: filter (mode/status/month/year + search), sort, Reset, add/edit/delete, status dropdown, analyze, metric cards. Row text màu theo status. Nút "Admin" khi username === "admin". Persist filter/sort vào localStorage key jt_filters_{username}.</file>
+        <file name="JtProfilePage.jsx">Profile editor: 4 tabs (Cá nhân, Kỹ năng, Kinh nghiệm, Học vấn). Resume upload + AI import.</file>
+        <file name="JobModal.jsx">Modal thêm/sửa job. Export emptyJob(). Có JdEditorModal sub-popup.</file>
+        <file name="JdViewModal.jsx">Modal xem JD text full.</file>
+        <file name="JtChat.jsx">Export JtChatBot + JtChatPopup. Chat AI tư vấn, file upload, clear history. renderMd() markdown đơn giản.</file>
+        <file name="MultiSelect.jsx">Export MultiSelect, MODE_OPTIONS, STATUS_OPTIONS. Dropdown multi-checkbox filter.</file>
+        <file name="ResumeViewModal.jsx">PDF viewer modal trong iframe.</file>
+      </dir>
+      <dir name="src/components/jtadmin/">
+        <file name="UsersTab.jsx">Tạo user, đổi password (kể cả admin), xóa user (trừ admin).</file>
+        <file name="JobsTab.jsx">Chọn user → xem/sửa jobs dạng JSON editor → lưu.</file>
+        <file name="AITab.jsx">Chọn active Gemini model, thêm/xóa available models.</file>
+      </dir>
+    </frontend_dir>
+  </filestructure>
+
+  <!-- ════════════════════════════════════════════════════════════
+       API ENDPOINTS
+       ════════════════════════════════════════════════════════════ -->
+  <api base_url="https://tienmai.space">
+
+    <section name="JT User — yêu cầu Bearer JWT (verify_jt_token, type='jobtracker')">
+      <endpoint method="POST" path="/api/jobtracker/login">Login. Body: {username, password}. Returns: {access_token, token_type, username}</endpoint>
+      <endpoint method="GET" path="/api/jobtracker/jobs/{username}">Lấy jobs của user (chỉ data của mình).</endpoint>
+      <endpoint method="PUT" path="/api/jobtracker/jobs/{username}">Lưu toàn bộ jobs. Body: array of job objects.</endpoint>
+      <endpoint method="GET" path="/api/jobtracker/profile/{username}">Lấy profile cá nhân.</endpoint>
+      <endpoint method="PUT" path="/api/jobtracker/profile/{username}">Cập nhật profile.</endpoint>
+      <endpoint method="GET" path="/api/jobtracker/resume/{username}/check">Kiểm tra resume tồn tại.</endpoint>
+      <endpoint method="POST" path="/api/jobtracker/resume/{username}">Upload resume PDF. Query ?import=true để AI extract profile. Lưu tại RESUME_DIR/{username}.pdf</endpoint>
+      <endpoint method="GET" path="/api/jobtracker/resume/{username}">Download resume PDF.</endpoint>
+      <endpoint method="DELETE" path="/api/jobtracker/resume/{username}">Xóa resume.</endpoint>
+      <endpoint method="GET" path="/api/jobtracker/chat/{username}/history">Lịch sử chat (60 messages).</endpoint>
+      <endpoint method="DELETE" path="/api/jobtracker/chat/{username}/history">Xóa lịch sử chat.</endpoint>
+      <endpoint method="POST" path="/api/jobtracker/chat/{username}">AI chat. Context: system prompt + resume + tất cả JD + history. analyze_context: gửi thêm cho AI, không lưu history.</endpoint>
+      <endpoint method="POST" path="/api/jobtracker/chat/{username}/file">Chat với file JD đính kèm (PDF/DOCX/TXT).</endpoint>
+    </section>
+
+    <section name="JT Admin — yêu cầu Bearer JWT (verify_jtadmin_token, sub == 'admin')">
+      <endpoint method="GET" path="/api/jtadmin/users">Danh sách users (không có hashed_password).</endpoint>
+      <endpoint method="POST" path="/api/jtadmin/users">Tạo user. Body: {username, password}</endpoint>
+      <endpoint method="PUT" path="/api/jtadmin/users/{username}">Đổi password user (kể cả admin). Body: {password}</endpoint>
+      <endpoint method="DELETE" path="/api/jtadmin/users/{username}">Xóa user (không xóa được admin). Xóa cả jobs + profile.</endpoint>
+      <endpoint method="GET" path="/api/jtadmin/jobs/{username}">Xem jobs của user bất kỳ.</endpoint>
+      <endpoint method="PUT" path="/api/jtadmin/jobs/{username}">Override toàn bộ jobs của user.</endpoint>
+      <endpoint method="GET" path="/api/jtadmin/ai-settings">Lấy AI settings (active_model, available_models).</endpoint>
+      <endpoint method="PUT" path="/api/jtadmin/ai-settings">Cập nhật AI settings.</endpoint>
+    </section>
+  </api>
+
+  <!-- ════════════════════════════════════════════════════════════
+       DATABASE SCHEMA (MongoDB — database "jobtracker")
+       ════════════════════════════════════════════════════════════ -->
+  <database name="jobtracker" driver="Motor (async)">
+
+    <collection name="users">
+      <fields>
+        <field name="username" type="string"/>
+        <field name="hashed_password" type="string">bcrypt hash</field>
+        <field name="created_at" type="datetime"/>
+      </fields>
+      <note>User "admin" vừa là tài khoản đăng nhập app vừa truy cập được JT Admin.</note>
+    </collection>
+
+    <collection name="jobs">
+      <description>Mỗi user 1 document, lưu toàn bộ jobs dưới dạng array.</description>
+      <fields>
+        <field name="username" type="string"/>
+        <field name="jobs" type="array">
+          [{id, title, url?, company, loc, mode, month, year, status, jd?, added_at?}]
+          status values: not_applied | applied | viewed | downloaded | interviewing | waiting | rejected | failed
+        </field>
+        <field name="updated_at" type="datetime"/>
+      </fields>
+    </collection>
+
+    <collection name="profiles">
+      <fields>
+        <field name="username" type="string"/>
+        <field name="name" type="string"/>
+        <field name="title" type="string"/>
+        <field name="location" type="string"/>
+        <field name="email" type="string"/>
+        <field name="phone" type="string"/>
+        <field name="linkedin" type="string"/>
+        <field name="about" type="string"/>
+        <field name="skills" type="array">["skill1", "skill2"]</field>
+        <field name="experiences" type="array">[{role, company, period, description}]</field>
+        <field name="educations" type="array">[{degree, school, period}]</field>
+        <field name="updated_at" type="datetime"/>
+      </fields>
+    </collection>
+
+    <collection name="chat_history">
+      <fields>
+        <field name="session_id" type="string">"jt_{username}_main"</field>
+        <field name="role" type="string">"user" hoặc "model"</field>
+        <field name="content" type="string"/>
+        <field name="created_at" type="datetime"/>
+      </fields>
+    </collection>
+
+    <collection name="settings">
+      <document type="ai">{type: "ai", active_model, available_models: [...]}</document>
+    </collection>
+  </database>
+
+  <!-- ════════════════════════════════════════════════════════════
+       DEPLOYMENT
+       ════════════════════════════════════════════════════════════ -->
+  <deployment>
+    <vps_paths>
+      <path alias="app_root">/root/job-tracker/</path>
+      <path alias="frontend_dist">/root/job-tracker/frontend/dist/</path>
+      <path alias="resumes">/root/job-tracker/resumes/{username}.pdf</path>
+      <path alias="venv">/root/job-tracker/job-tracker-venv/</path>
+      <path alias="env_file">/root/job-tracker/.env</path>
+      <path alias="deploy_script">/usr/local/bin/deploy-job-tracker.sh</path>
+    </vps_paths>
+    <flow>
+      1. Dev push lên GitLab branch main
+      2. GitLab CI/CD runner (tag: tienmai-space-vps) chạy deploy-job-tracker.sh
+      3. Script: git pull, pip install, npm build frontend, systemctl restart jobtracker
+      4. Nginx serve frontend/dist/ + proxy /api/jobtracker/ và /api/jtadmin/ → uvicorn port 8001
+    </flow>
+    <nginx_note>
+      Các location block của job-tracker được thêm vào server block của tienmai
+      (file /etc/nginx/sites-available/tienmai). Xem deploy/nginx-snippet.conf.
+      /jobtracker/ phải dùng trailing slash + alias .../dist/ + try_files để serve đúng JS/CSS.
+    </nginx_note>
+  </deployment>
+
+  <!-- ════════════════════════════════════════════════════════════
+       CONVENTIONS
+       ════════════════════════════════════════════════════════════ -->
+  <conventions>
+    <convention name="language">
+      Comments trong code: tiếng Anh.
+      UI (app người dùng + JT Admin): tiếng Việt.
+    </convention>
+    <convention name="git_workflow">
+      AI chỉ commit — KHÔNG push. Branch chính: main (protected trên GitLab).
+      2 remotes: origin (GitLab), github (GitHub).
+    </convention>
+    <convention name="admin_auth">
+      JT Admin dùng chung jobtracker token, chỉ cần sub == "admin". Không có login riêng,
+      không có token type riêng. Admin đăng nhập 1 lần ở /jobtracker rồi bấm nút Admin.
+    </convention>
+    <convention name="frontend_styling">
+      Inline styles 100%. CSS variables dark theme trong index.css:
+      --bg, --bg-surface, --bg-card, --border, --text, --text-muted, --accent (#ec563d), --font-display (Syne), --font-mono (DM Mono).
+    </convention>
+  </conventions>
+
+  <!-- ════════════════════════════════════════════════════════════
+       ENV VARIABLES (.env — không commit)
+       ════════════════════════════════════════════════════════════ -->
+  <env_variables>
+    <var name="MONGODB_URL">MongoDB connection string (cluster riêng của job-tracker)</var>
+    <var name="JWT_SECRET">Secret key để sign JWT (riêng, khác tienmai-space)</var>
+    <var name="GEMINI_API_KEY">Google AI Studio API key (có thể dùng chung với tienmai-space)</var>
+    <var name="RESUME_DIR">Thư mục lưu resume PDF (mặc định /root/job-tracker/resumes)</var>
+  </env_variables>
+
+</project>
