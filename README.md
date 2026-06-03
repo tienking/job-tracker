@@ -144,8 +144,8 @@ cd /root
 git clone git@gitlab.com:tienking/job-tracker.git job-tracker
 cd job-tracker
 
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv job-tracker-venv
+source job-tracker-venv/bin/activate
 pip install -r requirements.txt
 
 mkdir -p resumes
@@ -247,7 +247,7 @@ set -e
 cd /root/job-tracker
 git pull origin master
 source venv/bin/activate
-pip install -r requirements.txt --quiet
+job-tracker-venv/bin/pip install -r requirements.txt --quiet
 cd frontend && npm install --silent && npm run build && cd ..
 systemctl restart jobtracker
 ```
