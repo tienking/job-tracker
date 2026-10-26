@@ -140,6 +140,8 @@ npm run dev                              # proxies /api/ to http://127.0.0.1:800
 
 ## Deployment
 
+> **Which build is live?** The UI shows `v <commit> · <build time>` in the bottom-left corner of every page, stamped by `frontend/vite.config.js` at build time. After the CI pipeline finishes it should match `git log -1 --format=%h` — if not, the deploy didn't run or the build failed.
+
 Auto-deploy via GitLab CI/CD. Every push to `main` runs `deploy-job-tracker.sh` on the VPS:
 
 ```bash
