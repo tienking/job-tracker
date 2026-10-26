@@ -18,6 +18,7 @@ from auth import (
 import asyncio
 import os
 import io
+import time
 import re
 import json
 import base64
@@ -30,6 +31,39 @@ router = APIRouter()
 
 RESUME_DIR = os.getenv("RESUME_DIR", "/root/jobtracker/resumes")
 os.makedirs(RESUME_DIR, exist_ok=True)
+
+# ── Login rate limiting (in-memory, per client IP, resets on restart) ──────────
+
+_login_attempts: dict = {}  # ip -> {"count": int, "locked_until": float}
+_MAX_ATTEMPTS = 5
+_LOCKOUT_SECONDS = 300  # 5 minutes
+
+def _client_ip(req: Request) -> str:
+    # Behind nginx the socket peer is always 127.0.0.1; nginx overwrites X-Real-IP
+    # with the real $remote_addr, so it can't be spoofed by the client.
+    host = req.client.host if req.client else ""
+    if host in ("127.0.0.1", "::1"):
+        return req.headers.get("x-real-ip") or host
+    return host
+
+def _check_login_rate(ip: str):
+    entry = _login_attempts.get(ip)
+    if entry and entry["locked_until"] > time.time():
+        mins, secs = divmod(int(entry["locked_until"] - time.time()), 60)
+        raise HTTPException(status_code=429, detail=f"Đăng nhập sai quá nhiều lần. Thử lại sau {mins} phút {secs} giây.")
+
+def _record_login_failure(ip: str):
+    now = time.time()
+    if len(_login_attempts) > 10000:  # drop stale entries so the dict can't grow unbounded
+        for k in [k for k, v in _login_attempts.items() if v["locked_until"] < now]:
+            _login_attempts.pop(k, None)
+    entry = _login_attempts.get(ip)
+    if not entry or (entry["locked_until"] and entry["locked_until"] <= now):
+        entry = {"count": 0, "locked_until": 0.0}  # fresh window after a lockout expires
+    entry["count"] += 1
+    if entry["count"] >= _MAX_ATTEMPTS:
+        entry["locked_until"] = now + _LOCKOUT_SECONDS
+    _login_attempts[ip] = entry
 
 # ── Models ─────────────────────────────────────────────────────────────────────
 
@@ -149,10 +183,14 @@ def build_jd_context(jobs: list) -> str:
 # ── JT User: Login ─────────────────────────────────────────────────────────────
 
 @router.post("/api/jobtracker/login")
-async def jt_login(data: LoginRequest):
+async def jt_login(data: LoginRequest, req: Request):
+    ip = _client_ip(req)
+    _check_login_rate(ip)
     user = await get_user(data.username)
     if not user or not check_password(data.password, user["hashed_password"]):
+        _record_login_failure(ip)
         raise HTTPException(status_code=401, detail="Invalid username or password")
+    _login_attempts.pop(ip, None)
     return {"access_token": create_jt_token(data.username), "token_type": "bearer", "username": data.username}
 
 # ── JT User: Jobs ──────────────────────────────────────────────────────────────

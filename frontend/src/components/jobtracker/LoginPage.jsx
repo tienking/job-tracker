@@ -18,6 +18,7 @@ export default function LoginPage() {
     e.preventDefault(); setError(""); setLoading(true);
     try {
       const res = await fetch("/api/jobtracker/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      if (res.status === 429) { const d = await res.json().catch(() => ({})); setError(d.detail || "Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau."); return; }
       if (!res.ok) { setError("Sai username hoặc password."); return; }
       const data = await res.json();
       localStorage.setItem("jt_token", data.access_token);

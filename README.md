@@ -89,7 +89,7 @@ job-tracker/
 ### Job Tracker (user JWT)
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/jobtracker/login` | Login → JWT |
+| POST | `/api/jobtracker/login` | Login → JWT (5 failed attempts per IP → 429, locked 5 min) |
 | GET/PUT | `/api/jobtracker/jobs/{username}` | Get / update job list |
 | GET/PUT | `/api/jobtracker/profile/{username}` | Get / update profile |
 | GET/POST/DELETE | `/api/jobtracker/resume/{username}` | Resume file management |

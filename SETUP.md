@@ -208,6 +208,7 @@ grep gitlab-runner /etc/sudoers || echo "gitlab-runner ALL=(ALL) NOPASSWD: ALL" 
 ```
 □ tienmai.space/jobtracker            → login page loads (dark theme)
 □ Login as a normal user              → tracker board loads
+□ 5 wrong passwords in a row          → 6th attempt shows lockout message (429, 5 min)
 □ Add a job, change status, filter, sort, Reset
 □ Profile tab: edit + save; upload resume → AI fills fields
 □ Chatbot: opens, reads JDs + resume, responds in Vietnamese
